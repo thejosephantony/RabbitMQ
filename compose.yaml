@@ -1,0 +1,120 @@
+name: dcompany
+
+x-app: &app
+  image: dcompany:1.0
+  build: .
+  environment: &app-env
+    RABBITMQ_HOST: rabbitmq
+    RABBITMQ_PORT: "5672"
+    RABBITMQ_USER: dcompany
+    RABBITMQ_PASSWORD: dcompany_dev
+    RABBITMQ_VHOST: "/"
+    STORAGE_IDS: "1,2"
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+    init:
+      condition: service_completed_successfully
+
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: dcompany
+      RABBITMQ_DEFAULT_PASS: dcompany_dev
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity", "--address", "127.0.0.1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  init:
+    <<: *app
+    command: ["init"]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: "no"
+
+  conversor1:
+    <<: *app
+    command: ["conversor"]
+    environment:
+      <<: *app-env
+      INSTANCE_ID: "1"
+    restart: unless-stopped
+
+  conversor2:
+    <<: *app
+    command: ["conversor"]
+    environment:
+      <<: *app-env
+      INSTANCE_ID: "2"
+    restart: unless-stopped
+
+  armazenamento1:
+    <<: *app
+    command: ["armazenamento"]
+    environment:
+      <<: *app-env
+      STORAGE_ID: "1"
+      STORAGE_DIR: /dados
+    volumes:
+      - ./armazenamento/servidor1:/dados
+    restart: unless-stopped
+
+  armazenamento2:
+    <<: *app
+    command: ["armazenamento"]
+    environment:
+      <<: *app-env
+      STORAGE_ID: "2"
+      STORAGE_DIR: /dados
+    volumes:
+      - ./armazenamento/servidor2:/dados
+    restart: unless-stopped
+
+  cliente1:
+    <<: *app
+    profiles: ["envio"]
+    command: ["cliente", "/imagens"]
+    environment:
+      <<: *app-env
+      INSTANCE_ID: "1"
+    volumes:
+      - ./clientes/cliente1:/imagens:ro
+    restart: "no"
+
+  cliente2:
+    <<: *app
+    profiles: ["envio"]
+    command: ["cliente", "/imagens"]
+    environment:
+      <<: *app-env
+      INSTANCE_ID: "2"
+    volumes:
+      - ./clientes/cliente2:/imagens:ro
+    restart: "no"
+
+  verificar:
+    image: dcompany:1.0
+    build: .
+    profiles: ["verificacao"]
+    command: ["verificar", "/clientes", "/armazenamento"]
+    environment:
+      STORAGE_IDS: "1,2"
+    volumes:
+      - ./clientes:/clientes:ro
+      - ./armazenamento:/armazenamento:ro
+    restart: "no"
+
+volumes:
+  rabbitmq_data:
